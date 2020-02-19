@@ -11,9 +11,9 @@ import (
 	"crypto/des"
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	"errors"
+	"github.com/pkg/errors"
 
-	"software.sslmate.com/src/go-pkcs12/internal/rc2"
+	"bukodi.github.com/go-pkcs12/internal/rc2"
 )
 
 var (
@@ -73,12 +73,12 @@ func pbeCipherFor(algorithm pkix.AlgorithmIdentifier, password []byte) (cipher.B
 	case algorithm.Algorithm.Equal(oidPBEWithSHAAnd40BitRC2CBC):
 		cipherType = shaWith40BitRC2CBC{}
 	default:
-		return nil, nil, NotImplementedError("algorithm " + algorithm.Algorithm.String() + " is not supported")
+		return nil, nil, errors.WithStack(NotImplementedError("algorithm " + algorithm.Algorithm.String() + " is not supported"))
 	}
 
 	var params pbeParams
 	if err := unmarshal(algorithm.Parameters.FullBytes, &params); err != nil {
-		return nil, nil, err
+		return nil, nil, errors.WithStack(err)
 	}
 
 	key := cipherType.deriveKey(params.Salt, password, params.Iterations)
@@ -86,7 +86,7 @@ func pbeCipherFor(algorithm pkix.AlgorithmIdentifier, password []byte) (cipher.B
 
 	block, err := cipherType.create(key)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, errors.WithStack(err)
 	}
 
 	return block, iv, nil
@@ -95,7 +95,7 @@ func pbeCipherFor(algorithm pkix.AlgorithmIdentifier, password []byte) (cipher.B
 func pbDecrypterFor(algorithm pkix.AlgorithmIdentifier, password []byte) (cipher.BlockMode, int, error) {
 	block, iv, err := pbeCipherFor(algorithm, password)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, errors.WithStack(err)
 	}
 
 	return cipher.NewCBCDecrypter(block, iv), block.BlockSize(), nil
@@ -109,10 +109,10 @@ func pbDecrypt(info decryptable, password []byte) (decrypted []byte, err error) 
 
 	encrypted := info.Data()
 	if len(encrypted) == 0 {
-		return nil, errors.New("pkcs12: empty encrypted data")
+		return nil, errors.WithStack(errors.New("pkcs12: empty encrypted data"))
 	}
 	if len(encrypted)%blockSize != 0 {
-		return nil, errors.New("pkcs12: input is not a multiple of the block size")
+		return nil, errors.WithStack(errors.New("pkcs12: input is not a multiple of the block size"))
 	}
 	decrypted = make([]byte, len(encrypted))
 	cbc.CryptBlocks(decrypted, encrypted)
@@ -128,7 +128,7 @@ func pbDecrypt(info decryptable, password []byte) (decrypted []byte, err error) 
 	ps := decrypted[len(decrypted)-psLen:]
 	decrypted = decrypted[:len(decrypted)-psLen]
 	if bytes.Compare(ps, bytes.Repeat([]byte{byte(psLen)}, psLen)) != 0 {
-		return nil, ErrDecryption
+		return nil, errors.WithStack(ErrDecryption)
 	}
 
 	return
@@ -143,7 +143,7 @@ type decryptable interface {
 func pbEncrypterFor(algorithm pkix.AlgorithmIdentifier, password []byte) (cipher.BlockMode, int, error) {
 	block, iv, err := pbeCipherFor(algorithm, password)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, errors.WithStack(err)
 	}
 
 	return cipher.NewCBCEncrypter(block, iv), block.BlockSize(), nil
@@ -152,7 +152,7 @@ func pbEncrypterFor(algorithm pkix.AlgorithmIdentifier, password []byte) (cipher
 func pbEncrypt(info encryptable, decrypted []byte, password []byte) error {
 	cbc, blockSize, err := pbEncrypterFor(info.Algorithm(), password)
 	if err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 
 	psLen := blockSize - len(decrypted)%blockSize

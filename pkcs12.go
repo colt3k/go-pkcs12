@@ -23,7 +23,7 @@ import (
 	"encoding/asn1"
 	"encoding/hex"
 	"encoding/pem"
-	"errors"
+	"github.com/pkg/errors"
 	"io"
 )
 
@@ -104,6 +104,9 @@ func (i *encryptedPrivateKeyInfo) SetData(data []byte) {
 const (
 	certificateType = "CERTIFICATE"
 	privateKeyType  = "PRIVATE KEY"
+	crlType         = "CERTIFICATE REVOCATION LIST"
+	secretBagType   = "SECRET BAG"
+	pkcs12BagType   = "PKCS12"
 )
 
 // unmarshal calls asn1.Unmarshal, but also returns an error if there is any
@@ -111,10 +114,10 @@ const (
 func unmarshal(in []byte, out interface{}) error {
 	trailing, err := asn1.Unmarshal(in, out)
 	if err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 	if len(trailing) != 0 {
-		return errors.New("pkcs12: trailing data found")
+		return errors.WithStack(errors.New("pkcs12: trailing data found"))
 	}
 	return nil
 }
@@ -127,7 +130,7 @@ func unmarshal(in []byte, out interface{}) error {
 func ToPEM(pfxData []byte, password string) ([]*pem.Block, error) {
 	encodedPassword, err := bmpString(password)
 	if err != nil {
-		return nil, ErrIncorrectPassword
+		return nil, errors.WithStack(ErrIncorrectPassword)
 	}
 
 	bags, encodedPassword, err := getSafeContents(pfxData, encodedPassword)
@@ -156,25 +159,37 @@ func convertBag(bag *safeBag, password []byte) (*pem.Block, error) {
 	for _, attribute := range bag.Attributes {
 		k, v, err := convertAttribute(&attribute)
 		if err != nil {
-			return nil, err
+			return nil, errors.WithStack(err)
 		}
 		block.Headers[k] = v
 	}
 
 	switch {
-	case bag.Id.Equal(oidCertBag):
-		block.Type = certificateType
-		certsData, err := decodeCertBag(bag.Value.Bytes)
+	case bag.Id.Equal(oidKeyBag):
+		block.Type = privateKeyType
+
+		key, err := decodePkcs8KeyBag(bag.Value.Bytes)
 		if err != nil {
-			return nil, err
+			return nil, errors.WithStack(err)
 		}
-		block.Bytes = certsData
+
+		switch key := key.(type) {
+		case *rsa.PrivateKey:
+			block.Bytes = x509.MarshalPKCS1PrivateKey(key)
+		case *ecdsa.PrivateKey:
+			block.Bytes, err = x509.MarshalECPrivateKey(key)
+			if err != nil {
+				return nil, errors.WithStack(err)
+			}
+		default:
+			return nil, errors.WithStack(errors.New("found unknown private key type in PKCS#8 wrapping"))
+		}
 	case bag.Id.Equal(oidPKCS8ShroundedKeyBag):
 		block.Type = privateKeyType
 
 		key, err := decodePkcs8ShroudedKeyBag(bag.Value.Bytes, password)
 		if err != nil {
-			return nil, err
+			return nil, errors.WithStack(err)
 		}
 
 		switch key := key.(type) {
@@ -186,10 +201,31 @@ func convertBag(bag *safeBag, password []byte) (*pem.Block, error) {
 				return nil, err
 			}
 		default:
-			return nil, errors.New("found unknown private key type in PKCS#8 wrapping")
+			return nil, errors.WithStack(errors.New("found unknown private key type in PKCS#8 wrapping"))
 		}
+	case bag.Id.Equal(oidCertBag):
+		block.Type = certificateType
+		certsData, err := decodeCertBag(bag.Value.Bytes)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		block.Bytes = certsData
+	case bag.Id.Equal(oidCrlBag):
+		block.Type = crlType
+		crlData, err := decodeCrlBag(bag.Value.Bytes)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		block.Bytes = crlData
+	case bag.Id.Equal(oidSecretBag):
+		block.Type = secretBagType
+		crlData, err := decodeSecretBag(bag.Value.Bytes)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+		block.Bytes = crlData
 	default:
-		return nil, errors.New("don't know how to convert a safe bag of type " + bag.Id.String())
+		return nil, errors.WithStack(errors.New("don't know how to convert a safe bag of type " + bag.Id.String()))
 	}
 	return block, nil
 }
@@ -208,20 +244,20 @@ func convertAttribute(attribute *pkcs12Attribute) (key, value string, err error)
 		key = "Microsoft CSP Name"
 		isString = true
 	default:
-		return "", "", errors.New("pkcs12: unknown attribute with OID " + attribute.Id.String())
+		key = attribute.Id.String()
 	}
 
 	if isString {
 		if err := unmarshal(attribute.Value.Bytes, &attribute.Value); err != nil {
-			return "", "", err
+			return "", "", errors.WithStack(err)
 		}
 		if value, err = decodeBMPString(attribute.Value.Bytes); err != nil {
-			return "", "", err
+			return "", "", errors.WithStack(err)
 		}
 	} else {
 		var id []byte
 		if err := unmarshal(attribute.Value.Bytes, &id); err != nil {
-			return "", "", err
+			return "", "", errors.WithStack(err)
 		}
 		value = hex.EncodeToString(id)
 	}
@@ -237,7 +273,7 @@ func Decode(pfxData []byte, password string) (privateKey interface{}, certificat
 	var caCerts []*x509.Certificate
 	privateKey, certificate, caCerts, err = DecodeChain(pfxData, password)
 	if len(caCerts) != 0 {
-		err = errors.New("pkcs12: expected exactly two safe bags in the PFX PDU")
+		err = errors.WithStack(errors.New("pkcs12: expected exactly two safe bags in the PFX PDU"))
 	}
 	return
 }
@@ -250,7 +286,7 @@ func Decode(pfxData []byte, password string) (privateKey interface{}, certificat
 func DecodeChain(pfxData []byte, password string) (privateKey interface{}, certificate *x509.Certificate, caCerts []*x509.Certificate, err error) {
 	encodedPassword, err := bmpString(password)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, errors.WithStack(err)
 	}
 
 	bags, encodedPassword, err := getSafeContents(pfxData, encodedPassword)
@@ -281,7 +317,7 @@ func DecodeChain(pfxData []byte, password string) (privateKey interface{}, certi
 
 		case bag.Id.Equal(oidPKCS8ShroundedKeyBag):
 			if privateKey != nil {
-				err = errors.New("pkcs12: expected exactly one key bag")
+				err = errors.WithStack(errors.New("pkcs12: expected exactly one key bag"))
 				return nil, nil, nil, err
 			}
 
@@ -292,10 +328,10 @@ func DecodeChain(pfxData []byte, password string) (privateKey interface{}, certi
 	}
 
 	if certificate == nil {
-		return nil, nil, nil, errors.New("pkcs12: certificate missing")
+		return nil, nil, nil, errors.WithStack(errors.New("pkcs12: certificate missing"))
 	}
 	if privateKey == nil {
-		return nil, nil, nil, errors.New("pkcs12: private key missing")
+		return nil, nil, nil, errors.WithStack(errors.New("pkcs12: private key missing"))
 	}
 
 	return
@@ -304,7 +340,7 @@ func DecodeChain(pfxData []byte, password string) (privateKey interface{}, certi
 func getSafeContents(p12Data, password []byte) (bags []safeBag, updatedPassword []byte, err error) {
 	pfx := new(pfxPdu)
 	if err := unmarshal(p12Data, pfx); err != nil {
-		return nil, nil, errors.New("pkcs12: error reading P12 data: " + err.Error())
+		return nil, nil, errors.WithStack(errors.New("pkcs12: error reading P12 data: " + err.Error()))
 	}
 
 	if pfx.Version != 3 {
@@ -312,16 +348,16 @@ func getSafeContents(p12Data, password []byte) (bags []safeBag, updatedPassword 
 	}
 
 	if !pfx.AuthSafe.ContentType.Equal(oidDataContentType) {
-		return nil, nil, NotImplementedError("only password-protected PFX is implemented")
+		return nil, nil, errors.WithStack(NotImplementedError("only password-protected PFX is implemented"))
 	}
 
 	// unmarshal the explicit bytes in the content for type 'data'
 	if err := unmarshal(pfx.AuthSafe.Content.Bytes, &pfx.AuthSafe.Content); err != nil {
-		return nil, nil, err
+		return nil, nil, errors.WithStack(err)
 	}
 
 	if len(pfx.MacData.Mac.Algorithm.Algorithm) == 0 {
-		return nil, nil, errors.New("pkcs12: no MAC in data")
+		return nil, nil, errors.WithStack(errors.New("pkcs12: no MAC in data"))
 	}
 
 	if err := verifyMac(&pfx.MacData, pfx.AuthSafe.Content.Bytes, password); err != nil {
@@ -333,17 +369,17 @@ func getSafeContents(p12Data, password []byte) (bags []safeBag, updatedPassword 
 			err = verifyMac(&pfx.MacData, pfx.AuthSafe.Content.Bytes, password)
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, errors.WithStack(err)
 		}
 	}
 
 	var authenticatedSafe []contentInfo
 	if err := unmarshal(pfx.AuthSafe.Content.Bytes, &authenticatedSafe); err != nil {
-		return nil, nil, err
+		return nil, nil, errors.WithStack(err)
 	}
 
 	if len(authenticatedSafe) != 2 {
-		return nil, nil, NotImplementedError("expected exactly two items in the authenticated safe")
+		return nil, nil, errors.WithStack(NotImplementedError("expected exactly two items in the authenticated safe"))
 	}
 
 	for _, ci := range authenticatedSafe {
@@ -352,7 +388,7 @@ func getSafeContents(p12Data, password []byte) (bags []safeBag, updatedPassword 
 		switch {
 		case ci.ContentType.Equal(oidDataContentType):
 			if err := unmarshal(ci.Content.Bytes, &data); err != nil {
-				return nil, nil, err
+				return nil, nil, errors.WithStack(err)
 			}
 		case ci.ContentType.Equal(oidEncryptedDataContentType):
 			var encryptedData encryptedData
@@ -363,7 +399,7 @@ func getSafeContents(p12Data, password []byte) (bags []safeBag, updatedPassword 
 				return nil, nil, NotImplementedError("only version 0 of EncryptedData is supported")
 			}
 			if data, err = pbDecrypt(encryptedData.EncryptedContentInfo, password); err != nil {
-				return nil, nil, err
+				return nil, nil, errors.WithStack(err)
 			}
 		default:
 			return nil, nil, NotImplementedError("only data and encryptedData content types are supported in authenticated safe")
