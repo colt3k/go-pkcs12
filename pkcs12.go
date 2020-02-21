@@ -198,7 +198,7 @@ func convertBag(bag *safeBag, password []byte) (*pem.Block, error) {
 		case *ecdsa.PrivateKey:
 			block.Bytes, err = x509.MarshalECPrivateKey(key)
 			if err != nil {
-				return nil, err
+				return nil, errors.WithStack(err)
 			}
 		default:
 			return nil, errors.WithStack(errors.New("found unknown private key type in PKCS#8 wrapping"))
@@ -244,7 +244,7 @@ func convertAttribute(attribute *pkcs12Attribute) (key, value string, err error)
 		key = "Microsoft CSP Name"
 		isString = true
 	default:
-		key = attribute.Id.String()
+		return "", "", errors.WithStack(errors.New("pkcs12: unknown attribute with OID " + attribute.Id.String()))
 	}
 
 	if isString {
@@ -291,7 +291,7 @@ func DecodeChain(pfxData []byte, password string) (privateKey interface{}, certi
 
 	bags, encodedPassword, err := getSafeContents(pfxData, encodedPassword)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, errors.WithStack(err)
 	}
 
 	for _, bag := range bags {
@@ -299,15 +299,15 @@ func DecodeChain(pfxData []byte, password string) (privateKey interface{}, certi
 		case bag.Id.Equal(oidCertBag):
 			certsData, err := decodeCertBag(bag.Value.Bytes)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, errors.WithStack(err)
 			}
 			certs, err := x509.ParseCertificates(certsData)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, errors.WithStack(err)
 			}
 			if len(certs) != 1 {
 				err = errors.New("pkcs12: expected exactly one certificate in the certBag")
-				return nil, nil, nil, err
+				return nil, nil, nil, errors.WithStack(err)
 			}
 			if certificate == nil {
 				certificate = certs[0]
@@ -318,11 +318,11 @@ func DecodeChain(pfxData []byte, password string) (privateKey interface{}, certi
 		case bag.Id.Equal(oidPKCS8ShroundedKeyBag):
 			if privateKey != nil {
 				err = errors.WithStack(errors.New("pkcs12: expected exactly one key bag"))
-				return nil, nil, nil, err
+				return nil, nil, nil, errors.WithStack(err)
 			}
 
 			if privateKey, err = decodePkcs8ShroudedKeyBag(bag.Value.Bytes, encodedPassword); err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, errors.WithStack(err)
 			}
 		}
 	}
@@ -344,7 +344,7 @@ func getSafeContents(p12Data, password []byte) (bags []safeBag, updatedPassword 
 	}
 
 	if pfx.Version != 3 {
-		return nil, nil, NotImplementedError("can only decode v3 PFX PDU's")
+		return nil, nil, errors.WithStack(NotImplementedError("can only decode v3 PFX PDU's"))
 	}
 
 	if !pfx.AuthSafe.ContentType.Equal(oidDataContentType) {
@@ -436,7 +436,7 @@ func getSafeContents(p12Data, password []byte) (bags []safeBag, updatedPassword 
 func Encode(rand io.Reader, privateKey interface{}, certificate *x509.Certificate, caCerts []*x509.Certificate, password string) (pfxData []byte, err error) {
 	encodedPassword, err := bmpString(password)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	var pfx pfxPdu
@@ -449,19 +449,19 @@ func Encode(rand io.Reader, privateKey interface{}, certificate *x509.Certificat
 	localKeyIdAttr.Value.Tag = 17
 	localKeyIdAttr.Value.IsCompound = true
 	if localKeyIdAttr.Value.Bytes, err = asn1.Marshal(certFingerprint[:]); err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	var certBags []safeBag
 	var certBag *safeBag
 	if certBag, err = makeCertBag(certificate.Raw, []pkcs12Attribute{localKeyIdAttr}); err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 	certBags = append(certBags, *certBag)
 
 	for _, cert := range caCerts {
 		if certBag, err = makeCertBag(cert.Raw, []pkcs12Attribute{}); err != nil {
-			return nil, err
+			return nil, errors.WithStack(err)
 		}
 		certBags = append(certBags, *certBag)
 	}
@@ -472,7 +472,7 @@ func Encode(rand io.Reader, privateKey interface{}, certificate *x509.Certificat
 	keyBag.Value.Tag = 0
 	keyBag.Value.IsCompound = true
 	if keyBag.Value.Bytes, err = encodePkcs8ShroudedKeyBag(rand, privateKey, encodedPassword); err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 	keyBag.Attributes = append(keyBag.Attributes, localKeyIdAttr)
 
@@ -481,26 +481,26 @@ func Encode(rand io.Reader, privateKey interface{}, certificate *x509.Certificat
 	// The second SafeContents is unencrypted and contains the shrouded key bag.
 	var authenticatedSafe [2]contentInfo
 	if authenticatedSafe[0], err = makeSafeContents(rand, certBags, encodedPassword); err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 	if authenticatedSafe[1], err = makeSafeContents(rand, []safeBag{keyBag}, nil); err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	var authenticatedSafeBytes []byte
 	if authenticatedSafeBytes, err = asn1.Marshal(authenticatedSafe[:]); err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	// compute the MAC
 	pfx.MacData.Mac.Algorithm.Algorithm = oidSHA1
 	pfx.MacData.MacSalt = make([]byte, 8)
 	if _, err = rand.Read(pfx.MacData.MacSalt); err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 	pfx.MacData.Iterations = 1
 	if err = computeMac(&pfx.MacData, authenticatedSafeBytes, encodedPassword); err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	pfx.AuthSafe.ContentType = oidDataContentType
@@ -508,11 +508,11 @@ func Encode(rand io.Reader, privateKey interface{}, certificate *x509.Certificat
 	pfx.AuthSafe.Content.Tag = 0
 	pfx.AuthSafe.Content.IsCompound = true
 	if pfx.AuthSafe.Content.Bytes, err = asn1.Marshal(authenticatedSafeBytes); err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	if pfxData, err = asn1.Marshal(pfx); err != nil {
-		return nil, errors.New("pkcs12: error writing P12 data: " + err.Error())
+		return nil, errors.WithStack(errors.New("pkcs12: error writing P12 data: " + err.Error()))
 	}
 	return
 }
@@ -524,7 +524,7 @@ func makeCertBag(certBytes []byte, attributes []pkcs12Attribute) (certBag *safeB
 	certBag.Value.Tag = 0
 	certBag.Value.IsCompound = true
 	if certBag.Value.Bytes, err = encodeCertBag(certBytes); err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 	certBag.Attributes = attributes
 	return
@@ -533,6 +533,7 @@ func makeCertBag(certBytes []byte, attributes []pkcs12Attribute) (certBag *safeB
 func makeSafeContents(rand io.Reader, bags []safeBag, password []byte) (ci contentInfo, err error) {
 	var data []byte
 	if data, err = asn1.Marshal(bags); err != nil {
+		err = errors.WithStack(err)
 		return
 	}
 
@@ -542,17 +543,20 @@ func makeSafeContents(rand io.Reader, bags []safeBag, password []byte) (ci conte
 		ci.Content.Tag = 0
 		ci.Content.IsCompound = true
 		if ci.Content.Bytes, err = asn1.Marshal(data); err != nil {
+			err = errors.WithStack(err)
 			return
 		}
 	} else {
 		randomSalt := make([]byte, 8)
 		if _, err = rand.Read(randomSalt); err != nil {
+			err = errors.WithStack(err)
 			return
 		}
 
 		var algo pkix.AlgorithmIdentifier
 		algo.Algorithm = oidPBEWithSHAAnd40BitRC2CBC
 		if algo.Parameters.FullBytes, err = asn1.Marshal(pbeParams{Salt: randomSalt, Iterations: 2048}); err != nil {
+			err = errors.WithStack(err)
 			return
 		}
 
@@ -561,6 +565,7 @@ func makeSafeContents(rand io.Reader, bags []safeBag, password []byte) (ci conte
 		encryptedData.EncryptedContentInfo.ContentType = oidDataContentType
 		encryptedData.EncryptedContentInfo.ContentEncryptionAlgorithm = algo
 		if err = pbEncrypt(&encryptedData.EncryptedContentInfo, data, password); err != nil {
+			err = errors.WithStack(err)
 			return
 		}
 
@@ -569,6 +574,7 @@ func makeSafeContents(rand io.Reader, bags []safeBag, password []byte) (ci conte
 		ci.Content.Tag = 0
 		ci.Content.IsCompound = true
 		if ci.Content.Bytes, err = asn1.Marshal(encryptedData); err != nil {
+			err = errors.WithStack(err)
 			return
 		}
 	}

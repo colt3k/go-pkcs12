@@ -3,6 +3,11 @@ package pkcs12
 import (
 	"encoding/base64"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -85,4 +90,38 @@ func TestMyPEM(t *testing.T) {
 	}
 	fmt.Printf("%+v", pem)
 
+}
+
+func Test1(t *testing.T) {
+	input := `Instance name: ROOT\0004
+`
+	re := regexp.MustCompile("Instance name:(.*)")
+	instanceName := re.FindStringSubmatch(input)[1]
+	fmt.Println(strings.TrimSpace(instanceName))
+}
+func TestErrType(t *testing.T) {
+	fset := token.NewFileSet()
+	// Parse src but stop after processing the imports.
+	f, err := parser.ParseFile(fset, "pkcs12.go", nil, 0)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	// Print the imports from the file's AST.
+
+	for _, d := range f.Decls {
+		fn, ok := d.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+
+		retTypes := fn.Type.Results.List
+		if len(retTypes) == 0 {
+			continue
+		}
+		lastRetType := retTypes[len(retTypes)-1]
+
+		fmt.Println(fn.Name.Name, lastRetType.Type)
+	}
 }

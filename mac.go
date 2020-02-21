@@ -10,6 +10,7 @@ import (
 	"crypto/sha1"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"github.com/pkg/errors"
 )
 
 type macData struct {
@@ -30,7 +31,7 @@ var (
 
 func verifyMac(macData *macData, message, password []byte) error {
 	if !macData.Mac.Algorithm.Algorithm.Equal(oidSHA1) {
-		return NotImplementedError("unknown digest algorithm: " + macData.Mac.Algorithm.Algorithm.String())
+		return errors.WithStack(NotImplementedError("unknown digest algorithm: " + macData.Mac.Algorithm.Algorithm.String()))
 	}
 
 	key := pbkdf(sha1Sum, 20, 64, macData.MacSalt, password, macData.Iterations, 3, 20)
@@ -40,14 +41,14 @@ func verifyMac(macData *macData, message, password []byte) error {
 	expectedMAC := mac.Sum(nil)
 
 	if !hmac.Equal(macData.Mac.Digest, expectedMAC) {
-		return ErrIncorrectPassword
+		return errors.WithStack(ErrIncorrectPassword)
 	}
 	return nil
 }
 
 func computeMac(macData *macData, message, password []byte) error {
 	if !macData.Mac.Algorithm.Algorithm.Equal(oidSHA1) {
-		return NotImplementedError("unknown digest algorithm: " + macData.Mac.Algorithm.Algorithm.String())
+		return errors.WithStack(NotImplementedError("unknown digest algorithm: " + macData.Mac.Algorithm.Algorithm.String()))
 	}
 
 	key := pbkdf(sha1Sum, 20, 64, macData.MacSalt, password, macData.Iterations, 3, 20)

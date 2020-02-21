@@ -34,7 +34,8 @@ type pbeCipher interface {
 type shaWithTripleDESCBC struct{}
 
 func (shaWithTripleDESCBC) create(key []byte) (cipher.Block, error) {
-	return des.NewTripleDESCipher(key)
+	cipher, err := des.NewTripleDESCipher(key)
+	return cipher, errors.WithStack(err)
 }
 
 func (shaWithTripleDESCBC) deriveKey(salt, password []byte, iterations int) []byte {
@@ -48,7 +49,8 @@ func (shaWithTripleDESCBC) deriveIV(salt, password []byte, iterations int) []byt
 type shaWith40BitRC2CBC struct{}
 
 func (shaWith40BitRC2CBC) create(key []byte) (cipher.Block, error) {
-	return rc2.New(key, len(key)*8)
+	cipher, err := rc2.New(key, len(key)*8)
+	return cipher, errors.WithStack(err)
 }
 
 func (shaWith40BitRC2CBC) deriveKey(salt, password []byte, iterations int) []byte {
@@ -104,7 +106,7 @@ func pbDecrypterFor(algorithm pkix.AlgorithmIdentifier, password []byte) (cipher
 func pbDecrypt(info decryptable, password []byte) (decrypted []byte, err error) {
 	cbc, blockSize, err := pbDecrypterFor(info.Algorithm(), password)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 
 	encrypted := info.Data()
@@ -119,11 +121,11 @@ func pbDecrypt(info decryptable, password []byte) (decrypted []byte, err error) 
 
 	psLen := int(decrypted[len(decrypted)-1])
 	if psLen == 0 || psLen > blockSize {
-		return nil, ErrDecryption
+		return nil, errors.WithStack(ErrDecryption)
 	}
 
 	if len(decrypted) < psLen {
-		return nil, ErrDecryption
+		return nil, errors.WithStack(ErrDecryption)
 	}
 	ps := decrypted[len(decrypted)-psLen:]
 	decrypted = decrypted[:len(decrypted)-psLen]
