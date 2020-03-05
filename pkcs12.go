@@ -139,9 +139,14 @@ func ToPEM(pfxData []byte, password string) ([]*pem.Block, error) {
 		return nil, err
 	}
 
+	var errors []error = make([]error, 0)
+	errCollector := func(err error) {
+		errors = append(errors, err)
+	}
+
 	blocks := make([]*pem.Block, 0, len(bags))
 	for _, bag := range bags {
-		block, err := convertBag(&bag, encodedPassword)
+		block, err := convertBag(&bag, encodedPassword, errCollector)
 		if err != nil {
 			return nil, err
 		}
@@ -151,13 +156,13 @@ func ToPEM(pfxData []byte, password string) ([]*pem.Block, error) {
 	return blocks, nil
 }
 
-func convertBag(bag *safeBag, password []byte) (*pem.Block, error) {
+func convertBag(bag *safeBag, password []byte, errCollector func(error)) (*pem.Block, error) {
 	block := &pem.Block{
 		Headers: make(map[string]string),
 	}
 
 	for _, attribute := range bag.Attributes {
-		k, v, err := convertAttribute(&attribute)
+		k, v, err := convertAttribute(&attribute, errCollector)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
@@ -219,18 +224,18 @@ func convertBag(bag *safeBag, password []byte) (*pem.Block, error) {
 		block.Bytes = crlData
 	case bag.Id.Equal(oidSecretBag):
 		block.Type = secretBagType
-		crlData, err := decodeSecretBag(bag.Value.Bytes)
+		secretData, err := decodeSecretBag(bag.Value.Bytes, password)
 		if err != nil {
 			return nil, errors.WithStack(err)
 		}
-		block.Bytes = crlData
+		block.Bytes = secretData
 	default:
 		return nil, errors.WithStack(errors.New("don't know how to convert a safe bag of type " + bag.Id.String()))
 	}
 	return block, nil
 }
 
-func convertAttribute(attribute *pkcs12Attribute) (key, value string, err error) {
+func convertAttribute(attribute *pkcs12Attribute, errCollector func(error)) (key, value string, err error) {
 	isString := false
 
 	switch {
@@ -244,7 +249,10 @@ func convertAttribute(attribute *pkcs12Attribute) (key, value string, err error)
 		key = "Microsoft CSP Name"
 		isString = true
 	default:
-		return "", "", errors.WithStack(errors.New("pkcs12: unknown attribute with OID " + attribute.Id.String()))
+		errCollector(errors.WithStack(errors.New("pkcs12: unknown attribute with OID " + attribute.Id.String())))
+		key = attribute.Id.String()
+		value = hex.EncodeToString(attribute.Value.Bytes)
+		return key, value, nil
 	}
 
 	if isString {
@@ -396,18 +404,18 @@ func getSafeContents(p12Data, password []byte) (bags []safeBag, updatedPassword 
 				return nil, nil, err
 			}
 			if encryptedData.Version != 0 {
-				return nil, nil, NotImplementedError("only version 0 of EncryptedData is supported")
+				return nil, nil, errors.WithStack(NotImplementedError("only version 0 of EncryptedData is supported"))
 			}
 			if data, err = pbDecrypt(encryptedData.EncryptedContentInfo, password); err != nil {
 				return nil, nil, errors.WithStack(err)
 			}
 		default:
-			return nil, nil, NotImplementedError("only data and encryptedData content types are supported in authenticated safe")
+			return nil, nil, errors.WithStack(NotImplementedError("only data and encryptedData content types are supported in authenticated safe"))
 		}
 
 		var safeContents []safeBag
 		if err := unmarshal(data, &safeContents); err != nil {
-			return nil, nil, err
+			return nil, nil, errors.WithStack(err)
 		}
 		bags = append(bags, safeContents...)
 	}

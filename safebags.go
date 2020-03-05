@@ -11,6 +11,7 @@ import (
 	"encoding/asn1"
 	"github.com/pkg/errors"
 	"io"
+	"io/ioutil"
 )
 
 var (
@@ -160,13 +161,14 @@ func encodeCrlBag(x509Crl *pkix.CertificateList) (asn1Data []byte, err error) {
 	return asn1Data, nil
 }
 
-func decodeSecretBag(asn1Data []byte) (secretData []byte, err error) {
+func decodeSecretBag(asn1Data, password []byte) (secretData []byte, err error) {
+
 	ret := new(asn1.RawValue)
 	if err = unmarshal(asn1Data, ret); err != nil {
 		return nil, errors.WithStack(errors.New("pkcs12: error unmarshaling secret data: " + err.Error()))
 	}
-
-	return ret.FullBytes, nil
+	ioutil.WriteFile("/tmp/asndump.dat", ret.FullBytes, 0644)
+	return ret.Bytes, err
 }
 
 func encodeSecretBag(secretData []byte) (asn1Data []byte, err error) {

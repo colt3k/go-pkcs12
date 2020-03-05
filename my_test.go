@@ -1,6 +1,7 @@
 package pkcs12
 
 import (
+	"crypto/x509"
 	"encoding/base64"
 	"fmt"
 	"go/ast"
@@ -88,7 +89,34 @@ func TestMyPEM(t *testing.T) {
 		//fmt.Println(err.Error())
 		t.Fatalf("%+v", err)
 	}
-	fmt.Printf("%+v", pem)
+	for _, block := range pem {
+		fmt.Printf("---%s---\n", block.Type)
+		for attrKey, attrValue := range block.Headers {
+			fmt.Printf("  %s = %s\n", attrKey, attrValue)
+		}
+
+		if block.Type == "PRIVATE KEY" {
+			key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+			if err != nil {
+				//t.Log(err)
+				key, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+				if err != nil {
+					//t.Log(err)
+					key, err = x509.ParseECPrivateKey(block.Bytes)
+				}
+			}
+			if key != nil {
+				fmt.Printf("Key: %#v\n", key)
+			}
+		} else if block.Type == "CERTIFICATE" {
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				t.Fatalf("%+v", err)
+			}
+			fmt.Printf("  Subject: %s\n", cert.Subject.String())
+		}
+
+	}
 
 }
 
