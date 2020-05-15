@@ -1,4 +1,4 @@
-module bukodi.github.com/go-pkcs12
+module github.com/colt3k/go-pkcs12
 
 go 1.12
 
