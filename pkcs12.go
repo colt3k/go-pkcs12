@@ -386,9 +386,9 @@ func getSafeContents(p12Data, password []byte) (bags []safeBag, updatedPassword 
 		return nil, nil, errors.WithStack(err)
 	}
 
-	if len(authenticatedSafe) != 2 {
+	/*if len(authenticatedSafe) != 2 {
 		return nil, nil, errors.WithStack(NotImplementedError("expected exactly two items in the authenticated safe"))
-	}
+	}*/
 
 	for _, ci := range authenticatedSafe {
 		var data []byte
