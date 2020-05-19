@@ -9,9 +9,10 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	"github.com/pkg/errors"
 	"io"
 	"io/ioutil"
+
+	"github.com/pkg/errors"
 )
 
 var (
@@ -161,7 +162,30 @@ func encodeCrlBag(x509Crl *pkix.CertificateList) (asn1Data []byte, err error) {
 	return asn1Data, nil
 }
 
-func decodeSecretBag(asn1Data, password []byte) (secretData []byte, err error) {
+func decodeSecretBag(asn1Data, password []byte)(secretData []byte, err error) {
+
+	bag := new(secretBag)
+	if err := unmarshal(asn1Data, bag); err != nil {
+		return nil, errors.WithStack(errors.New("pkcs12: error decoding secret bag: " + err.Error()))
+	}
+	if !bag.Id.Equal(oidPKCS8ShroundedKeyBag) {
+		return nil, errors.WithStack(NotImplementedError("only secret bags are supported"))
+	}
+
+	pkinfo := new(encryptedPrivateKeyInfo)
+	if err = unmarshal(bag.Data, pkinfo); err != nil {
+		return nil, errors.WithStack(errors.New("pkcs12: error decoding PKCS#8 shrouded key bag: " + err.Error()))
+	}
+
+	pkData, err := pbDecrypt(pkinfo, password)
+	if err != nil {
+		return nil, errors.WithStack(errors.New("pkcs12: error decrypting PKCS#8 shrouded key bag: " + err.Error()))
+	}
+
+	dat := pkData[22:]
+	return dat, nil
+}
+func decodeSecretBagOrig(asn1Data, password []byte) (secretData []byte, err error) {
 
 	ret := new(asn1.RawValue)
 	if err = unmarshal(asn1Data, ret); err != nil {

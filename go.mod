@@ -4,6 +4,7 @@ go 1.12
 
 require (
 	github.com/docker/go v1.5.1-1 // indirect
+	github.com/fullsailor/pkcs7 v0.0.0-20190404230743-d7302db945fa
 	github.com/miekg/pkcs11 v1.0.3
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.4.2
