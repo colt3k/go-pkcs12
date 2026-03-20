@@ -76,6 +76,10 @@ type pbeParams struct {
 	Iterations int
 }
 
+// pbeCipherFor resolves the algorithm identifier used by a bag into the block
+// cipher and IV needed for CBC encryption or decryption. Classic PKCS#12 PBE
+// paths use BMPString passwords, while PBES2 inputs are normalized back to
+// UTF-8 for compatibility with newer toolchains.
 func pbeCipherFor(algorithm pkix.AlgorithmIdentifier, password []byte) (cipher.Block, []byte, error) {
 	var cipherType pbeCipher
 
@@ -157,25 +161,25 @@ func pbDecrypt(info decryptable, password []byte) (decrypted []byte, err error) 
 	return
 }
 
-// PBES2-params ::= SEQUENCE {
-// 	keyDerivationFunc AlgorithmIdentifier {{PBES2-KDFs}},
-// 	encryptionScheme AlgorithmIdentifier {{PBES2-Encs}}
-// }
+//	PBES2-params ::= SEQUENCE {
+//		keyDerivationFunc AlgorithmIdentifier {{PBES2-KDFs}},
+//		encryptionScheme AlgorithmIdentifier {{PBES2-Encs}}
+//	}
 type pbes2Params struct {
 	Kdf              pkix.AlgorithmIdentifier
 	EncryptionScheme pkix.AlgorithmIdentifier
 }
 
-// PBKDF2-params ::= SEQUENCE {
-//     salt CHOICE {
-//       specified OCTET STRING,
-//       otherSource AlgorithmIdentifier {{PBKDF2-SaltSources}}
-//     },
-//     iterationCount INTEGER (1..MAX),
-//     keyLength INTEGER (1..MAX) OPTIONAL,
-//     prf AlgorithmIdentifier {{PBKDF2-PRFs}} DEFAULT
-//     algid-hmacWithSHA1
-// }
+//	PBKDF2-params ::= SEQUENCE {
+//	    salt CHOICE {
+//	      specified OCTET STRING,
+//	      otherSource AlgorithmIdentifier {{PBKDF2-SaltSources}}
+//	    },
+//	    iterationCount INTEGER (1..MAX),
+//	    keyLength INTEGER (1..MAX) OPTIONAL,
+//	    prf AlgorithmIdentifier {{PBKDF2-PRFs}} DEFAULT
+//	    algid-hmacWithSHA1
+//	}
 type pbkdf2Params struct {
 	Salt       asn1.RawValue
 	Iterations int
@@ -183,6 +187,9 @@ type pbkdf2Params struct {
 	Prf        pkix.AlgorithmIdentifier
 }
 
+// pbes2CipherFor supports PBKDF2 plus AES-256-CBC, which newer producers may
+// emit even though Encode still writes the classic PKCS#12 compatibility
+// algorithms.
 func pbes2CipherFor(algorithm pkix.AlgorithmIdentifier, password []byte) (cipher.Block, []byte, error) {
 	var params pbes2Params
 	if err := unmarshal(algorithm.Parameters.FullBytes, &params); err != nil {
@@ -243,6 +250,8 @@ func pbEncrypterFor(algorithm pkix.AlgorithmIdentifier, password []byte) (cipher
 	return cipher.NewCBCEncrypter(block, iv), block.BlockSize(), nil
 }
 
+// pbEncrypt applies PKCS#7-style padding before encrypting the bag payload in
+// CBC mode.
 func pbEncrypt(info encryptable, decrypted []byte, password []byte) error {
 	cbc, blockSize, err := pbEncrypterFor(info.Algorithm(), password)
 	if err != nil {

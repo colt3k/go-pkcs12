@@ -14,7 +14,9 @@ var (
 	clientID     = "mytestalias2"
 	clientSecret string
 	vaultKey     = "myvault"
-	pkcs12Path   = "./test/test.p12"
+	// Adjust this path before running the sample. The checked-in fixture lives
+	// at ./test.p12, while this default expects a generated copy under ./test/.
+	pkcs12Path = "./test/test.p12"
 )
 
 func main() {
@@ -22,6 +24,8 @@ func main() {
 	fmt.Printf("sec: |%v|\n", s)
 }
 
+// ClientSecret walks the PEM blocks returned by ToPEM and extracts the secret
+// bag whose friendlyName matches the requested client ID.
 func ClientSecret(pkcs12Path, vaultKey, clientID string) string {
 	f, err := os.Open(pkcs12Path)
 	if err != nil {

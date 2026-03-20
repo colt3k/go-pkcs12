@@ -42,6 +42,8 @@ type secretBag struct {
 	Data []byte `asn1:"tag:0,explicit"`
 }
 
+// decodePkcs8ShroudedKeyBag decrypts a shrouded key bag and parses the
+// resulting PKCS#8 private key.
 func decodePkcs8ShroudedKeyBag(asn1Data, password []byte) (privateKey interface{}, err error) {
 	pkinfo := new(encryptedPrivateKeyInfo)
 	if err = unmarshal(asn1Data, pkinfo); err != nil {
@@ -65,6 +67,8 @@ func decodePkcs8ShroudedKeyBag(asn1Data, password []byte) (privateKey interface{
 	return privateKey, nil
 }
 
+// encodePkcs8ShroudedKeyBag marshals a private key as PKCS#8 and encrypts it
+// with the classic PKCS#12 shrouded-key algorithm used by Encode.
 func encodePkcs8ShroudedKeyBag(rand io.Reader, privateKey interface{}, password []byte) (asn1Data []byte, err error) {
 	var pkData []byte
 	if pkData, err = x509.MarshalPKCS8PrivateKey(privateKey); err != nil {
@@ -162,6 +166,10 @@ func encodeCrlBag(x509Crl *pkix.CertificateList) (asn1Data []byte, err error) {
 	return asn1Data, nil
 }
 
+// decodeSecretBag implements the fork-specific secret-bag path used by the
+// sample program. It expects the inner payload to be carried as a shrouded
+// PKCS#8 blob and returns the decrypted bytes after trimming the fixed wrapper
+// prefix used by those inputs.
 func decodeSecretBag(asn1Data, password []byte) (secretData []byte, err error) {
 
 	bag := new(secretBag)
@@ -185,6 +193,9 @@ func decodeSecretBag(asn1Data, password []byte) (secretData []byte, err error) {
 	dat := pkData[22:]
 	return dat, nil
 }
+
+// decodeSecretBagOrig is a legacy debug helper kept for raw secret-bag
+// inspection during development.
 func decodeSecretBagOrig(asn1Data, password []byte) (secretData []byte, err error) {
 
 	ret := new(asn1.RawValue)
@@ -195,6 +206,7 @@ func decodeSecretBagOrig(asn1Data, password []byte) (secretData []byte, err erro
 	return ret.Bytes, err
 }
 
+// encodeSecretBag wraps raw bytes in the fork's secretBag structure.
 func encodeSecretBag(secretData []byte) (asn1Data []byte, err error) {
 	var bag secretBag
 	bag.Id = oidSecretBag

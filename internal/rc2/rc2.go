@@ -23,7 +23,8 @@ type rc2Cipher struct {
 	k [64]uint16
 }
 
-// New returns a new rc2 cipher with the given key and effective key length t1
+// New returns a new rc2 cipher with the given key. t1 is the effective key
+// length in bits used during RC2 key expansion.
 func New(key []byte, t1 int) (cipher.Block, error) {
 	// TODO(dgryski): error checking for key length
 	return &rc2Cipher{

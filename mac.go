@@ -15,13 +15,14 @@ import (
 	"hash"
 )
 
+// macData mirrors the integrity block attached to the outer PFX structure.
 type macData struct {
 	Mac        digestInfo
 	MacSalt    []byte
 	Iterations int `asn1:"optional,default:1"`
 }
 
-// from PKCS#7:
+// digestInfo follows the PKCS#7 DigestInfo structure used inside macData.
 type digestInfo struct {
 	Algorithm pkix.AlgorithmIdentifier
 	Digest    []byte
@@ -32,6 +33,8 @@ var (
 	oidSHA256 = asn1.ObjectIdentifier([]int{2, 16, 840, 1, 101, 3, 4, 2, 1})
 )
 
+// verifyMac recomputes the integrity MAC and maps a mismatch to
+// ErrIncorrectPassword, which is the caller-visible signal for a bad password.
 func verifyMac(macData *macData, message, password []byte) error {
 	var hFn func() hash.Hash
 	var key []byte
@@ -56,6 +59,7 @@ func verifyMac(macData *macData, message, password []byte) error {
 	return nil
 }
 
+// computeMac fills the outer PFX MAC used by Encode.
 func computeMac(macData *macData, message, password []byte) error {
 	if !macData.Mac.Algorithm.Algorithm.Equal(oidSHA1) {
 		return errors.WithStack(NotImplementedError("unknown digest algorithm: " + macData.Mac.Algorithm.Algorithm.String()))

@@ -30,6 +30,8 @@ func bmpString(s string) ([]byte, error) {
 	return append(ret, 0, 0), nil
 }
 
+// decodeBMPString decodes a PKCS#12 BMPString/UCS-2 value and tolerates the
+// optional trailing NULL terminator used by PKCS#12 passwords and attributes.
 func decodeBMPString(bmpString []byte) (string, error) {
 	if len(bmpString)%2 != 0 {
 		return "", errors.WithStack(errors.New("pkcs12: odd-length BMP string"))

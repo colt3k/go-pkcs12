@@ -12,6 +12,10 @@
 // This package is forked from golang.org/x/crypto/pkcs12, which is frozen.
 // The implementation is distilled from https://tools.ietf.org/html/rfc7292
 // and referenced documents.
+//
+// DecodeChain and Encode are the supported high-level APIs. ToPEM is retained
+// for compatibility and bag inspection, but it does not emit PKCS#8-wrapped
+// private-key PEM blocks.
 package pkcs12 // import "software.sslmate.com/src/go-pkcs12"
 
 import (
@@ -156,6 +160,8 @@ func ToPEM(pfxData []byte, password string) ([]*pem.Block, error) {
 	return blocks, nil
 }
 
+// convertBag maps one PKCS#12 safe bag into a PEM block and carries selected
+// PKCS#12 attributes into PEM headers.
 func convertBag(bag *safeBag, password []byte, errCollector func(error)) (*pem.Block, error) {
 	block := &pem.Block{
 		Headers: make(map[string]string),
@@ -235,6 +241,8 @@ func convertBag(bag *safeBag, password []byte, errCollector func(error)) (*pem.B
 	return block, nil
 }
 
+// convertAttribute normalizes supported PKCS#12 attribute OIDs into OpenSSL-
+// style PEM header keys.
 func convertAttribute(attribute *pkcs12Attribute, errCollector func(error)) (key, value string, err error) {
 	isString := false
 
@@ -345,6 +353,9 @@ func DecodeChain(pfxData []byte, password string) (privateKey interface{}, certi
 	return
 }
 
+// getSafeContents parses the outer PFX, verifies the MAC, and flattens every
+// authenticated safe entry into a single safeBag slice for higher-level decode
+// helpers.
 func getSafeContents(p12Data, password []byte) (bags []safeBag, updatedPassword []byte, err error) {
 	pfx := new(pfxPdu)
 	if err := unmarshal(p12Data, pfx); err != nil {
@@ -525,6 +536,8 @@ func Encode(rand io.Reader, privateKey interface{}, certificate *x509.Certificat
 	return
 }
 
+// makeCertBag wraps DER certificate bytes in a cert safe bag with the caller-
+// supplied attributes.
 func makeCertBag(certBytes []byte, attributes []pkcs12Attribute) (certBag *safeBag, err error) {
 	certBag = new(safeBag)
 	certBag.Id = oidCertBag
@@ -538,6 +551,8 @@ func makeCertBag(certBytes []byte, attributes []pkcs12Attribute) (certBag *safeB
 	return
 }
 
+// makeSafeContents marshals bags into either a plain data contentInfo or an
+// encryptedData contentInfo, depending on whether a password is supplied.
 func makeSafeContents(rand io.Reader, bags []safeBag, password []byte) (ci contentInfo, err error) {
 	var data []byte
 	if data, err = asn1.Marshal(bags); err != nil {
