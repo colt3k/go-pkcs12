@@ -162,7 +162,7 @@ func encodeCrlBag(x509Crl *pkix.CertificateList) (asn1Data []byte, err error) {
 	return asn1Data, nil
 }
 
-func decodeSecretBag(asn1Data, password []byte)(secretData []byte, err error) {
+func decodeSecretBag(asn1Data, password []byte) (secretData []byte, err error) {
 
 	bag := new(secretBag)
 	if err := unmarshal(asn1Data, bag); err != nil {
