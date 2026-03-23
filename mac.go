@@ -11,7 +11,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	"github.com/pkg/errors"
 	"hash"
 )
 
@@ -56,20 +55,5 @@ func verifyMac(macData *macData, message, password []byte) error {
 	if !hmac.Equal(macData.Mac.Digest, expectedMAC) {
 		return ErrIncorrectPassword
 	}
-	return nil
-}
-
-// computeMac fills the outer PFX MAC used by Encode.
-func computeMac(macData *macData, message, password []byte) error {
-	if !macData.Mac.Algorithm.Algorithm.Equal(oidSHA1) {
-		return errors.WithStack(NotImplementedError("unknown digest algorithm: " + macData.Mac.Algorithm.Algorithm.String()))
-	}
-
-	key := pbkdf(sha1Sum, 20, 64, macData.MacSalt, password, macData.Iterations, 3, 20)
-
-	mac := hmac.New(sha1.New, key)
-	mac.Write(message)
-	macData.Mac.Digest = mac.Sum(nil)
-
 	return nil
 }

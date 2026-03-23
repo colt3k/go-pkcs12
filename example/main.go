@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/colt3k/go-pkcs12"
 	"io"
 	"log"
 	"os"
 	"strings"
+
+	"github.com/colt3k/go-pkcs12"
 )
 
 var (

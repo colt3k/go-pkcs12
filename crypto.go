@@ -240,37 +240,3 @@ type decryptable interface {
 	Algorithm() pkix.AlgorithmIdentifier
 	Data() []byte
 }
-
-func pbEncrypterFor(algorithm pkix.AlgorithmIdentifier, password []byte) (cipher.BlockMode, int, error) {
-	block, iv, err := pbeCipherFor(algorithm, password)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return cipher.NewCBCEncrypter(block, iv), block.BlockSize(), nil
-}
-
-// pbEncrypt applies PKCS#7-style padding before encrypting the bag payload in
-// CBC mode.
-func pbEncrypt(info encryptable, decrypted []byte, password []byte) error {
-	cbc, blockSize, err := pbEncrypterFor(info.Algorithm(), password)
-	if err != nil {
-		return err
-	}
-
-	psLen := blockSize - len(decrypted)%blockSize
-	encrypted := make([]byte, len(decrypted)+psLen)
-	copy(encrypted[:len(decrypted)], decrypted)
-	copy(encrypted[len(decrypted):], bytes.Repeat([]byte{byte(psLen)}, psLen))
-	cbc.CryptBlocks(encrypted, encrypted)
-
-	info.SetData(encrypted)
-
-	return nil
-}
-
-// encryptable abstracts a object that contains ciphertext.
-type encryptable interface {
-	Algorithm() pkix.AlgorithmIdentifier
-	SetData([]byte)
-}

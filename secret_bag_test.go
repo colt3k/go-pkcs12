@@ -1,18 +1,14 @@
 package pkcs12
 
 import (
-	"crypto/x509"
 	"encoding/base64"
-	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"regexp"
 	"strings"
 	"testing"
+
+	pkgerrors "github.com/pkg/errors"
 )
 
-const testP12 = `MIIOjgIBAzCCDkcGCSqGSIb3DQEHAaCCDjgEgg40MIIOMDCCB1wGCSqGSIb3DQEHAaCCB00EggdJ
+const secretBagFixtureP12 = `MIIOjgIBAzCCDkcGCSqGSIb3DQEHAaCCDjgEgg40MIIOMDCCB1wGCSqGSIb3DQEHAaCCB00EggdJ
 MIIHRTCCBVYGCyqGSIb3DQEMCgECoIIE+zCCBPcwKQYKKoZIhvcNAQwBAzAbBBTnhCyLQbsowESt
 pGnSX4b+zv57kgIDAMNQBIIEyKKmthmPaNmveohmePXXh3Vj8HO62KFMspzFRaJPWNyiHZUo4G+M
 7MBoJbVQfBZHxAv3oO7VgV2SRng4aSh2f4o6K4lW8OkZQ4VBfQflZHtyaekJeYA4CWmSLdMcbfTW
@@ -79,77 +75,46 @@ Q211VXgYCIrrY6o8p8CpFiwE3p7foK0PGRcBZTbE5dN3ar/fVEFfu7XBc1uGlT+x+ktJRSvIEMDD
 7+yTo4XtY98gxr4XLE5A6qjzMD4wITAJBgUrDgMCGgUABBTd458/zmcODy753OQ3DNrHRk9bIgQU
 8H7s9Y4eUJHjgZmaWRA5MRmg+tQCAwGGoA==`
 
-func TestMyPEM(t *testing.T) {
-	data, err := base64.StdEncoding.DecodeString(testP12)
+func TestToPEMExtractsSecretBags(t *testing.T) {
+	data, err := base64.StdEncoding.DecodeString(secretBagFixtureP12)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pem, err := ToPEM(data, "changeit")
+
+	blocks, err := ToPEM(data, "changeit")
 	if err != nil {
-		//fmt.Println(err.Error())
-		t.Fatalf("%+v", err)
+		t.Fatalf("ToPEM returned an error: %+v", err)
 	}
-	for _, block := range pem {
-		fmt.Printf("---%s---\n", block.Type)
-		for attrKey, attrValue := range block.Headers {
-			fmt.Printf("  %s = %s\n", attrKey, attrValue)
-		}
-
-		if block.Type == "PRIVATE KEY" {
-			key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-			if err != nil {
-				//t.Log(err)
-				key, err = x509.ParsePKCS1PrivateKey(block.Bytes)
-				if err != nil {
-					//t.Log(err)
-					key, err = x509.ParseECPrivateKey(block.Bytes)
-				}
-			}
-			if key != nil {
-				fmt.Printf("Key: %#v\n", key)
-			}
-		} else if block.Type == "CERTIFICATE" {
-			cert, err := x509.ParseCertificate(block.Bytes)
-			if err != nil {
-				t.Fatalf("%+v", err)
-			}
-			fmt.Printf("  Subject: %s\n", cert.Subject.String())
-		}
-
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 secret bag, got %d", len(blocks))
 	}
 
+	block := blocks[0]
+	if block.Type != secretBagType {
+		t.Fatalf("expected %q block, got %q", secretBagType, block.Type)
+	}
+	if got := block.Headers["friendlyName"]; got != "test-aes-1" {
+		t.Fatalf("expected friendlyName header %q, got %q", "test-aes-1", got)
+	}
+	if got := block.Headers["localKeyId"]; got != "54696d652031353831343631343437323131" {
+		t.Fatalf("unexpected localKeyId header %q", got)
+	}
+	if len(block.Bytes) == 0 || strings.TrimSpace(string(block.Bytes)) == "" {
+		t.Fatal("expected secret bag bytes to be present")
+	}
 }
 
-func Test1(t *testing.T) {
-	input := `Instance name: ROOT\0004
-`
-	re := regexp.MustCompile("Instance name:(.*)")
-	instanceName := re.FindStringSubmatch(input)[1]
-	fmt.Println(strings.TrimSpace(instanceName))
-}
-func TestErrType(t *testing.T) {
-	fset := token.NewFileSet()
-	// Parse src but stop after processing the imports.
-	f, err := parser.ParseFile(fset, "pkcs12.go", nil, 0)
+func TestToPEMRejectsWrongPassword(t *testing.T) {
+	data, err := base64.StdEncoding.DecodeString(secretBagFixtureP12)
 	if err != nil {
-		fmt.Println(err)
-		return
+		t.Fatal(err)
 	}
 
-	// Print the imports from the file's AST.
-
-	for _, d := range f.Decls {
-		fn, ok := d.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-
-		retTypes := fn.Type.Results.List
-		if len(retTypes) == 0 {
-			continue
-		}
-		lastRetType := retTypes[len(retTypes)-1]
-
-		fmt.Println(fn.Name.Name, lastRetType.Type)
+	_, err = ToPEM(data, "wrong-password")
+	if err == nil {
+		t.Fatal("expected wrong password to fail")
+	}
+	if pkgerrors.Cause(err) != ErrIncorrectPassword {
+		t.Fatalf("expected ErrIncorrectPassword, got %+v", err)
 	}
 }
